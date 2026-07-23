@@ -1,0 +1,157 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* #ffffff */
+    --foreground: 0 0% 10%; /* #1a1a1a */
+    
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+    
+    --primary: 230 99% 65%;
+    --primary-foreground: 0 0% 98%;
+    
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 10%;
+    
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    
+    --accent: 230 99% 65%;
+    --accent-foreground: 0 0% 98%;
+    
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 230 99% 65%;
+    
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 0 0% 5%; /* #0d0d0d */
+    --foreground: 0 0% 91%; /* #e8e8e8 */
+    
+    --card: 0 0% 10%; /* #1a1a1a */
+    --card-foreground: 0 0% 91%;
+    
+    --popover: 0 0% 10%;
+    --popover-foreground: 0 0% 91%;
+    
+    --primary: 230 99% 65%; /* #4d6bfe */
+    --primary-foreground: 0 0% 91%;
+    
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 91%;
+    
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 33%; /* #555555 */
+    
+    --accent: 230 99% 65%;
+    --accent-foreground: 0 0% 91%;
+    
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 91%;
+
+    --border: 0 0% 16.5%; /* #2a2a2a */
+    --input: 0 0% 16.5%;
+    --ring: 230 99% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-text-primary overflow-hidden transition-colors duration-300;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d0d0d;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
+}
+
+/* Selection */
+::selection {
+  background-color: hsl(var(--accent) / 0.2);
+}
+
+/* Utilities */
+@layer components {
+  .card {
+    @apply bg-surface border border-border rounded-lg p-4;
+  }
+  
+  .input-deepseek {
+    @apply bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent;
+  }
+  
+  .btn-primary {
+    @apply bg-accent hover:bg-accent-hover text-white rounded-md px-4 py-2 transition-colors;
+  }
+  
+  .btn-secondary {
+    @apply bg-surface hover:bg-surface-hover text-text-primary border border-border rounded-md px-4 py-2 transition-colors;
+  }
+  
+  .sidebar-item {
+    @apply flex items-center gap-2 px-3 py-2 rounded-md hover:bg-surface transition-colors cursor-pointer text-text-secondary hover:text-text-primary;
+  }
+}
+
+/* Print Styles */
+@media print {
+  .print-hidden, nav, aside {
+    display: none !important;
+  }
+  
+  body, main, .bg-background, .bg-surface, #root {
+    background: white !important;
+    color: black !important;
+  }
+  
+  body, html, #root, .h-screen, .min-h-screen, main, .flex-1 {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+  
+  * {
+    color: black !important;
+    border-color: #ddd !important;
+    box-shadow: none !important;
+  }
+
+  .text-text-primary, .text-text-secondary, .text-text-muted {
+    color: black !important;
+  }
+  
+  .border-b, .border-t, .border-l, .border-r, .border {
+    border-color: #ddd !important;
+  }
+}
