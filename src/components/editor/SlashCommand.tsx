@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
-import { Type, Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, Quote, Code, Minus, Image as ImageIcon, Link as LinkIcon, FileText, Table, Columns, SplitSquareHorizontal } from 'lucide-react';
+import { Type, Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, Quote, Code, Minus, Image as ImageIcon, Link as LinkIcon, FileText, Table, Columns, SplitSquareHorizontal, Workflow } from 'lucide-react';
 import type { Block } from '../../types';
 
 interface SlashCommandProps {
@@ -20,7 +20,9 @@ const COMMANDS: { icon: React.FC<any>, label: string, type: Block['type'], alias
   { icon: CheckSquare, label: 'To-do List', type: 'todo', aliases: ['checkbox', 'task'] },
   { icon: Quote, label: 'Quote', type: 'quote', aliases: ['blockquote'] },
   { icon: Code, label: 'Code Block', type: 'code', aliases: ['pre', 'snippet'] },
+  { icon: Workflow, label: 'Diagram / Flowchart', type: 'diagram', aliases: ['mermaid', 'chart', 'flowchart', 'mindmap', 'sequence'] },
   { icon: ImageIcon, label: 'Image', type: 'image', aliases: ['picture', 'photo'] },
+  { icon: FileText, label: 'PDF Document', type: 'pdf', aliases: ['pdf', 'document', 'paper', 'reader'] },
   { icon: Table, label: 'Table', type: 'table', aliases: ['excel', 'grid', 'spreadsheet'] },
   { icon: Columns, label: 'Kanban Board', type: 'kanban', aliases: ['board', 'trello', 'tasks'] },
   { icon: SplitSquareHorizontal, label: '2 Columns', type: 'columns', aliases: ['split', 'half', 'layout', 'side'] },
@@ -28,6 +30,8 @@ const COMMANDS: { icon: React.FC<any>, label: string, type: Block['type'], alias
   { icon: FileText, label: 'Link To...', type: 'page-link', aliases: ['mention', 'page'] },
   { icon: Minus, label: 'Divider', type: 'divider', aliases: ['hr', 'line'] },
 ];
+
+
 
 export const SlashCommand: React.FC<SlashCommandProps> = ({ isOpen, onClose, onSelect, position, query }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);

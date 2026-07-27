@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Star, Trash, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,8 @@ import { usePageManagement } from '@/hooks/usePageManagement';
 import { useRecentPages } from '@/hooks/useRecentPages';
 import { Breadcrumb } from '@/components/common/Breadcrumb';
 import { DeleteConfirmDialog } from '@/components/common/DeleteConfirmDialog';
-import { WhiteboardEditor } from '@/components/whiteboard/WhiteboardEditor';
+
+const WhiteboardEditor = lazy(() => import('@/components/whiteboard/WhiteboardEditor').then(m => ({ default: m.WhiteboardEditor })));
 import { useSidebar } from '@/hooks/useSidebar';
 import type { Page } from '@/types';
 import { toast } from 'sonner';
@@ -126,12 +127,14 @@ export const WhiteboardPage: React.FC = () => {
 
       {/* Full-bleed whiteboard */}
       <div className="flex-1 relative overflow-hidden">
-        <WhiteboardEditor
-          page={page}
-          title={title}
-          setTitle={setTitle}
-          onUpdatePage={handleUpdatePage}
-        />
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center text-text-muted">Loading whiteboard editor...</div>}>
+          <WhiteboardEditor
+            page={page}
+            title={title}
+            setTitle={setTitle}
+            onUpdatePage={handleUpdatePage}
+          />
+        </Suspense>
       </div>
 
       <DeleteConfirmDialog 

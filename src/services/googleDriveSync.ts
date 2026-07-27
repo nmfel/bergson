@@ -5,7 +5,7 @@ import { cleanupOrphanedImages } from '../utils/storageCleanup';
 
 declare const google: any;
 
-const CLIENT_ID = 'xxxx'; // User will replace this
+const CLIENT_ID = '197043603410-joh2i9cf1p47hfsip91numdas0mia8so.apps.googleusercontent.com'; // User will replace this
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const BACKUP_FILENAME = 'bergson_backup.json';
 
@@ -27,7 +27,8 @@ export const googleDriveSync = {
               reject(response);
               return;
             }
-            useSyncStore.getState().setAccessToken(response.access_token);
+            const expiresIn = response.expires_in ? parseInt(response.expires_in, 10) : 3600;
+            useSyncStore.getState().setAccessToken(response.access_token, expiresIn);
             useSyncStore.getState().setIsConnected(true);
             resolve(response.access_token);
           },
@@ -46,10 +47,16 @@ export const googleDriveSync = {
     return googleDriveSync.requestToken('consent');
   },
 
-  ensureValidToken: async (): Promise<string> => {
-    const { accessToken, isConnected } = useSyncStore.getState();
+  ensureValidToken: async (interactive: boolean = true): Promise<string> => {
+    const { accessToken, tokenExpiresAt, isConnected } = useSyncStore.getState();
+    const now = Date.now();
 
-    // 1. Check existing token validity with lightweight request
+    // 1. Fast-path: Check if token is still valid by timestamp (with 1-minute buffer)
+    if (accessToken && tokenExpiresAt && now < (tokenExpiresAt - 60000)) {
+      return accessToken;
+    }
+
+    // 2. Validate token with lightweight Drive API request if token exists
     if (accessToken) {
       try {
         const query = `name='${BACKUP_FILENAME}'`;
@@ -58,6 +65,8 @@ export const googleDriveSync = {
           headers: { 'Authorization': `Bearer ${accessToken}` }
         });
         if (response.ok) {
+          // Refresh expiration buffer
+          useSyncStore.getState().setAccessToken(accessToken, 3600);
           return accessToken;
         }
       } catch (e) {
@@ -65,17 +74,22 @@ export const googleDriveSync = {
       }
     }
 
-    // 2. Token is expired or missing. If user connected Google Drive previously, attempt silent refresh
+    // 3. Token is expired or missing. Attempt silent refresh without popup
     if (isConnected || accessToken) {
       try {
         const newToken = await googleDriveSync.requestToken('');
         return newToken;
       } catch (e) {
-        console.warn('Silent token refresh failed, falling back to interactive login prompt.', e);
+        console.warn('Silent token refresh failed.', e);
       }
     }
 
-    // 3. Fallback to interactive consent login
+    // 4. If non-interactive (background/startup auto-backup), do NOT trigger popup
+    if (!interactive) {
+      throw new Error('Google Drive session expired. Re-authentication required.');
+    }
+
+    // 5. Interactive fallback: trigger consent login prompt
     return await googleDriveSync.login();
   },
 
@@ -97,8 +111,9 @@ export const googleDriveSync = {
     return data.files && data.files.length > 0 ? data.files[0].id : null;
   },
 
-  backup: async (): Promise<void> => {
-    const accessToken = await googleDriveSync.ensureValidToken();
+  backup: async (interactive: boolean = true): Promise<void> => {
+    const accessToken = await googleDriveSync.ensureValidToken(interactive);
+
 
     // 1. Purge dead images to ensure backup size is minimal
     await cleanupOrphanedImages();
@@ -159,8 +174,8 @@ export const googleDriveSync = {
     useSyncStore.getState().setLastSyncedAt(Date.now());
   },
 
-  restore: async (): Promise<void> => {
-    const accessToken = await googleDriveSync.ensureValidToken();
+  restore: async (interactive: boolean = true): Promise<void> => {
+    const accessToken = await googleDriveSync.ensureValidToken(interactive);
 
     // 1. Find the backup file
     const fileId = await googleDriveSync.getBackupFileId(accessToken);
@@ -201,11 +216,12 @@ export const googleDriveSync = {
     if (!lastSyncedAt || (now - lastSyncedAt > TWELVE_HOURS)) {
       try {
         console.log('[GoogleDriveSync] Running auto background backup...');
-        await googleDriveSync.backup();
+        await googleDriveSync.backup(false); // Non-interactive mode (silent refresh only, no popups)
         console.log('[GoogleDriveSync] Auto background backup complete.');
       } catch (e) {
-        console.warn('[GoogleDriveSync] Deferred auto background backup:', e);
+        console.warn('[GoogleDriveSync] Deferred auto background backup until user interaction:', e);
       }
     }
   }
+
 };

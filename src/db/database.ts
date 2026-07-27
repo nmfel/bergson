@@ -1,10 +1,11 @@
 import Dexie, { type Table } from 'dexie';
-import type { Page, Block, Image, Wikipedia, Preference } from '../types';
+import type { Page, Block, Image, PdfFile, Wikipedia, Preference } from '../types';
 
 export class BergsonDatabase extends Dexie {
   pages!: Table<Page, string>;
   blocks!: Table<Block, string>;
   images!: Table<Image, string>;
+  pdfs!: Table<PdfFile, string>;
   wikipedia!: Table<Wikipedia, string>;
   preferences!: Table<Preference, string>;
 
@@ -23,6 +24,11 @@ export class BergsonDatabase extends Dexie {
     // Version 4: Added tags array index to pages
     this.version(4).stores({
       pages: '++id, title, parentId, type, createdAt, updatedAt, isFavorite, isDeleted, status, *tags'
+    });
+
+    // Version 5: Added pdfs table for PDF annotation & viewer
+    this.version(5).stores({
+      pdfs: '++id, hash, name, size, pageCount, createdAt'
     });
   }
 }

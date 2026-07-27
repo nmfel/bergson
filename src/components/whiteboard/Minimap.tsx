@@ -11,14 +11,23 @@ export const Minimap: React.FC<MinimapProps> = ({ canvas }) => {
   useEffect(() => {
     if (!canvas) return;
 
-    const renderMap = () => setTick(t => t + 1);
+    let rafId: number | null = null;
+    const renderMap = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        setTick(t => t + 1);
+      });
+    };
 
     canvas.on('after:render', renderMap);
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       canvas.off('after:render', renderMap);
     };
   }, [canvas]);
+
 
   if (!canvas) return null;
 

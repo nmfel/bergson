@@ -74,6 +74,20 @@ export function clearBlobCache() {
   }, 10000);
 }
 
+export function base64ToBlob(base64Data: string): Blob {
+  const base64Index = base64Data.indexOf(';base64,');
+  const mimeMatch = base64Data.match(/^data:([^;]+);/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+  const rawBase64 = base64Index !== -1 ? base64Data.substring(base64Index + 8) : base64Data;
+  const binaryString = atob(rawBase64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
 export async function resolveImageUrl(url: string): Promise<string> {
   if (url.startsWith(IMAGE_PROTOCOL)) {
     const id = url.replace(IMAGE_PROTOCOL, '');
@@ -90,8 +104,7 @@ export async function resolveImageUrl(url: string): Promise<string> {
     const img = await imageRepository.getImageById(id);
     if (img && img.data) {
       try {
-        const response = await fetch(img.data);
-        const blob = await response.blob();
+        const blob = base64ToBlob(img.data);
         pruneBlobCache();
         const blobUrl = URL.createObjectURL(blob);
         blobUrlCache.set(id, blobUrl);
@@ -104,6 +117,7 @@ export async function resolveImageUrl(url: string): Promise<string> {
   }
   return url;
 }
+
 
 export function getIdFromBlobUrl(blobUrl: string): string | null {
   for (const [id, url] of blobUrlCache.entries()) {

@@ -4,6 +4,8 @@ import {
   Hand,
   Square,
   Circle,
+  Diamond,
+  Database,
   Minus,
   Pencil,
   Eraser,
@@ -26,7 +28,7 @@ import { cn } from '../../utils';
 export type ToolType =
   | 'select' | 'grab'
   | 'pencil' | 'eraser'
-  | 'rectangle' | 'circle' | 'line' | 'arrow'
+  | 'rectangle' | 'circle' | 'diamond' | 'cylinder' | 'line' | 'arrow'
   | 'text' | 'sticky'
   | 'image' | 'bookmark' | 'page-link';
 
@@ -59,8 +61,10 @@ const TOOL_GROUPS: ToolGroup[] = [
   {
     key: 'shape',
     tools: [
-      { id: 'rectangle', icon: <Square className="w-4.5 h-4.5" />, label: 'Rectangle (R)' },
-      { id: 'circle', icon: <Circle className="w-4.5 h-4.5" />, label: 'Circle (C)' },
+      { id: 'rectangle', icon: <Square className="w-4.5 h-4.5" />, label: 'Rectangle / Process' },
+      { id: 'diamond', icon: <Diamond className="w-4.5 h-4.5" />, label: 'Diamond / Decision' },
+      { id: 'cylinder', icon: <Database className="w-4.5 h-4.5" />, label: 'Database / Storage' },
+      { id: 'circle', icon: <Circle className="w-4.5 h-4.5" />, label: 'Circle / Start-End' },
       { id: 'line', icon: <Minus className="w-4.5 h-4.5" />, label: 'Line (L)' },
       { id: 'arrow', icon: <ArrowRight className="w-4.5 h-4.5" />, label: 'Arrow (A)' },
     ],
@@ -76,6 +80,7 @@ const TOOL_GROUPS: ToolGroup[] = [
   },
 ];
 
+
 /* ── Props ── */
 interface ToolbarProps {
   activeTool: ToolType;
@@ -88,9 +93,11 @@ interface ToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
   onImageSelect: (file: File) => void;
+  onPdfSelect?: (file: File) => void;
   onExportPDF: () => void;
   onExportImage: () => void;
 }
+
 
 /* ── Grouped tool button with flyout ── */
 const GroupButton: React.FC<{
@@ -187,10 +194,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   canUndo,
   canRedo,
   onImageSelect,
+  onPdfSelect,
   onExportPDF,
   onExportImage,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -224,7 +233,27 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         className="hidden"
       />
 
+      {/* PDF upload */}
+      <button
+        onClick={() => pdfInputRef.current?.click()}
+        title="Insert PDF Document"
+        className="p-2.5 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors"
+      >
+        <FileText className="w-4.5 h-4.5" />
+      </button>
+      <input
+        type="file"
+        ref={pdfInputRef}
+        onChange={(e) => {
+          if (e.target.files?.[0] && onPdfSelect) onPdfSelect(e.target.files[0]);
+          e.target.value = '';
+        }}
+        accept="application/pdf"
+        className="hidden"
+      />
+
       <div className="w-px h-7 bg-border mx-1" />
+
 
       {/* Color picker */}
       <button

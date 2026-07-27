@@ -15,7 +15,8 @@ export interface Page {
   tags?: string[];
 }
 
-export type BlockType = 'text' | 'heading1' | 'heading2' | 'heading3' | 'bullet' | 'numbered' | 'todo' | 'quote' | 'code' | 'image' | 'divider' | 'link' | 'page-link' | 'table' | 'kanban' | 'columns';
+export type BlockType = 'text' | 'heading1' | 'heading2' | 'heading3' | 'bullet' | 'numbered' | 'todo' | 'quote' | 'code' | 'image' | 'divider' | 'link' | 'page-link' | 'table' | 'kanban' | 'columns' | 'pdf' | 'diagram';
+
 
 export interface Block {
   id?: string;
@@ -35,6 +36,16 @@ export interface Image {
   createdAt: Date;
 }
 
+export interface PdfFile {
+  id?: string;
+  hash: string;
+  data: string; // Base64 or ArrayBuffer representation for Dexie storage
+  name: string;
+  size: number;
+  pageCount: number;
+  createdAt: Date;
+}
+
 export interface Wikipedia {
   id?: string;
   title: string;
@@ -49,3 +60,4 @@ export interface Preference {
   key: string;
   value: string; // JSON string
 }
+

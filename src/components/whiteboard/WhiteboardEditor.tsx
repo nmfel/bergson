@@ -13,12 +13,21 @@ import { useSettingsStore } from '../../store/settingsStore';
 import { PageSelectModal } from '../common/PageSelectModal';
 import { ImageCropModal } from '../common/ImageCropModal';
 import { useNavigate } from 'react-router-dom';
-import { Crop, ArrowUp, ArrowDown, Lock, Unlock } from 'lucide-react';
+import { Crop, ArrowUp, ArrowDown, Lock, Unlock, ChevronLeft, ChevronRight, Copy, Trash2, ExternalLink } from 'lucide-react';
+
+
+
 import jsPDF from 'jspdf';
 import { toast } from 'sonner';
 import { Minimap } from './Minimap';
+import { PdfImportModal, type PdfImportOptions } from '../common/PdfImportModal';
+import { storePdfToDB, resolvePdfUrl } from '../../utils/pdfStorage';
+import { pdfjsLib } from '../../utils/pdfWorkerInit';
+
+
 
 import type { Page } from '../../types';
+
 
 interface WhiteboardEditorProps {
   page: Page;
@@ -82,8 +91,88 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
   const [editingLinkObj, setEditingLinkObj] = useState<any>(null);
   
   // Image crop selection
-  const [selectedImageObj, setSelectedImageObj] = useState<fabric.Image | null>(null);
   const [croppingImageObj, setCroppingImageObj] = useState<fabric.Image | null>(null);
+
+  // PDF import & hover toolbar state
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
+  const [pdfPageCount, setPdfPageCount] = useState(1);
+  const [, setUpdateCounter] = useState(0);
+
+  const [isToolbarVisible, setIsToolbarVisible] = useState<boolean>(false);
+  const hideToolbarTimerRef = useRef<any>(null);
+
+  const showToolbar = useCallback(() => {
+    if (hideToolbarTimerRef.current) {
+      clearTimeout(hideToolbarTimerRef.current);
+      hideToolbarTimerRef.current = null;
+    }
+    setIsToolbarVisible(true);
+  }, []);
+
+  const scheduleHideToolbar = useCallback(() => {
+    if (!hideToolbarTimerRef.current) {
+      hideToolbarTimerRef.current = setTimeout(() => {
+        setIsToolbarVisible(false);
+        hideToolbarTimerRef.current = null;
+      }, 300);
+    }
+  }, []);
+
+  const handleSelectObject = useCallback((obj: fabric.Object | null) => {
+    setActiveObject(obj);
+    if (hideToolbarTimerRef.current) {
+      clearTimeout(hideToolbarTimerRef.current);
+      hideToolbarTimerRef.current = null;
+    }
+    setIsToolbarVisible(false);
+  }, []);
+
+
+
+
+  const handleDuplicateObject = useCallback(() => {
+    const canvas = fabricRef.current;
+    const activeObj = canvas?.getActiveObject();
+    if (!canvas || !activeObj) return;
+
+    const customProps = [
+      'bookmarkUrl', 'internalPageId', 'internalPageType', 'id', 'fromId', 'toId', 
+      'isArrow', 'fromX', 'fromY', 'toX', 'toY',
+      'pdfProtocolUrl', 'pdfStartPage', 'pdfEndPage', 'pdfCurrentPage', 'pdfPageCount', 'pdfPageNum', 'pdfIsSingleViewer', 'pdfPages'
+    ];
+
+    activeObj.clone((cloned: fabric.Object) => {
+      cloned.set({
+        left: (cloned.left || 0) + 30,
+        top: (cloned.top || 0) + 30
+      });
+      (cloned as any).id = `obj_${Math.random().toString(36).substr(2, 9)}`;
+
+      customProps.forEach(prop => {
+        (cloned as any)[prop] = (activeObj as any)[prop];
+      });
+      canvas.add(cloned);
+      canvas.setActiveObject(cloned);
+      canvas.renderAll();
+      handleSelectObject(cloned);
+    }, customProps);
+  }, [handleSelectObject]);
+
+
+  const handleDeleteObject = useCallback(() => {
+    const canvas = fabricRef.current;
+    const activeObj = canvas?.getActiveObject();
+    if (!canvas || !activeObj) return;
+
+    canvas.remove(activeObj);
+    canvas.discardActiveObject();
+    canvas.renderAll();
+    handleSelectObject(null);
+  }, [handleSelectObject]);
+
+
+
 
   // Keep settings in refs so event handlers always see latest value
   const activeToolRef = useRef<ToolType>(activeTool);
@@ -145,17 +234,72 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
     }, 1000);
   }, [page.id, updatePage]);
 
+  const CUSTOM_FABRIC_PROPERTIES = [
+    'bookmarkUrl', 'internalPageId', 'internalPageType', 'id', 'fromId', 'toId', 
+    'isArrow', 'fromX', 'fromY', 'toX', 'toY',
+    'pdfProtocolUrl', 'pdfStartPage', 'pdfEndPage', 'pdfCurrentPage', 'pdfPageCount', 'pdfPageNum', 'pdfIsSingleViewer', 'pdfPages'
+  ];
+
+
+  const restorePdfObjectsOnCanvas = useCallback(async (canvas: fabric.Canvas) => {
+    const objects = canvas.getObjects();
+    for (const obj of objects) {
+      const pdfUrlProtocol = (obj as any).pdfProtocolUrl;
+      if (pdfUrlProtocol) {
+        // If image element is already valid and loaded, skip heavy re-render to prevent lag
+        const el = (obj as any)._element;
+        if (el && el.src && el.src.length > 100 && el.complete) {
+          continue;
+        }
+
+        try {
+          const pdfUrl = await resolvePdfUrl(pdfUrlProtocol);
+          if (pdfUrl) {
+            const loadingTask = pdfjsLib.getDocument({ url: pdfUrl });
+            const pdf = await loadingTask.promise;
+            const pageNum = (obj as any).pdfCurrentPage || (obj as any).pdfPageNum || (obj as any).pdfStartPage || 1;
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 1.2 });
+
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = viewport.width;
+            tempCanvas.height = viewport.height;
+            const ctx = tempCanvas.getContext('2d')!;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            await page.render({ canvasContext: ctx, viewport, canvas: tempCanvas }).promise;
+
+            const imgUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
+            const imgEl = new Image();
+            imgEl.onload = () => {
+              (obj as any).setElement(imgEl);
+              canvas.renderAll();
+            };
+            imgEl.src = imgUrl;
+
+            // Immediately free canvas memory
+            tempCanvas.width = 0;
+            tempCanvas.height = 0;
+          }
+        } catch (err) {
+          console.error('Error restoring PDF canvas object on mount:', err);
+        }
+      }
+    }
+    canvas.renderAll();
+  }, []);
+
+
   const pushToHistory = useCallback(() => {
     if (!fabricRef.current || isHistoryUpdate.current) return;
-    const json = JSON.stringify(fabricRef.current.toJSON(['bookmarkUrl', 'internalPageId', 'internalPageType', 'id', 'fromId', 'toId', 'isArrow', 'fromX', 'fromY', 'toX', 'toY']));
+    const json = JSON.stringify(fabricRef.current.toJSON(CUSTOM_FABRIC_PROPERTIES));
     
     setUndoStack(prev => {
       const newStack = [...prev, json];
-      // Limit history to 50 states to prevent memory issues
       if (newStack.length > 50) newStack.shift();
       return newStack;
     });
-    setRedoStack([]); // Clear redo stack on new action
+    setRedoStack([]);
     saveStateToDB(json);
   }, [saveStateToDB]);
 
@@ -165,21 +309,20 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
     isHistoryUpdate.current = true;
     const canvas = fabricRef.current;
     
-    // The current state is the last item in undoStack.
-    // The state we want to revert to is the second to last item.
     const currentState = undoStack[undoStack.length - 1];
     const previousState = undoStack[undoStack.length - 2];
     
     setUndoStack(prev => prev.slice(0, -1));
     setRedoStack(prev => [...prev, currentState]);
     
-    canvas.loadFromJSON(previousState, () => {
+    canvas.loadFromJSON(previousState, async () => {
+      await restorePdfObjectsOnCanvas(canvas);
       canvas.renderAll();
       syncGrid(canvas);
       saveStateToDB(previousState);
       isHistoryUpdate.current = false;
     });
-  }, [undoStack, saveStateToDB, syncGrid]);
+  }, [undoStack, saveStateToDB, syncGrid, restorePdfObjectsOnCanvas]);
 
   const handleRedo = useCallback(() => {
     if (redoStack.length === 0 || !fabricRef.current) return;
@@ -192,13 +335,15 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
     setRedoStack(prev => prev.slice(0, -1));
     setUndoStack(prev => [...prev, nextState]);
     
-    canvas.loadFromJSON(nextState, () => {
+    canvas.loadFromJSON(nextState, async () => {
+      await restorePdfObjectsOnCanvas(canvas);
       canvas.renderAll();
       syncGrid(canvas);
       saveStateToDB(nextState);
       isHistoryUpdate.current = false;
     });
-  }, [redoStack, saveStateToDB, syncGrid]);
+  }, [redoStack, saveStateToDB, syncGrid, restorePdfObjectsOnCanvas]);
+
 
   // ─── Canvas Initialization ───
   useEffect(() => {
@@ -222,12 +367,12 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
         resolveImagesInJson(JSON.parse(contentToLoad)).then(resolvedObj => {
           if (isDisposed) return;
           isHistoryUpdate.current = true;
-          canvas.loadFromJSON(resolvedObj, () => {
+          canvas.loadFromJSON(resolvedObj, async () => {
             if (isDisposed) return;
+            await restorePdfObjectsOnCanvas(canvas);
             canvas.renderAll();
             syncGrid(canvas);
-            // Initialize history with loaded state
-            setUndoStack([JSON.stringify(canvas.toJSON(['bookmarkUrl', 'internalPageId', 'internalPageType', 'id', 'fromId', 'toId', 'isArrow', 'fromX', 'fromY', 'toX', 'toY']))]);
+            setUndoStack([JSON.stringify(canvas.toJSON(CUSTOM_FABRIC_PROPERTIES))]);
             isHistoryUpdate.current = false;
           });
         });
@@ -235,8 +380,9 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
         console.error('Failed to load whiteboard content:', e);
       }
     } else {
-       setUndoStack([JSON.stringify(canvas.toJSON(['bookmarkUrl', 'internalPageId', 'internalPageType', 'id', 'fromId', 'toId', 'isArrow', 'fromX', 'fromY', 'toX', 'toY']))]);
+       setUndoStack([JSON.stringify(canvas.toJSON(CUSTOM_FABRIC_PROPERTIES))]);
     }
+
 
     // Auto-save listeners
     canvas.on('object:modified', pushToHistory);
@@ -250,10 +396,32 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
     });
     canvas.on('object:removed', pushToHistory);
     
-    // Selection listeners for floating menu
-    canvas.on('selection:created', (e) => setActiveObject(e.selected?.[0] || null));
-    canvas.on('selection:updated', (e) => setActiveObject(e.selected?.[0] || null));
-    canvas.on('selection:cleared', () => setActiveObject(null));
+    // Selection & Hover listeners for floating action toolbar
+    canvas.on('selection:created', (e) => handleSelectObject(e.selected?.[0] || null));
+    canvas.on('selection:updated', (e) => handleSelectObject(e.selected?.[0] || null));
+    canvas.on('selection:cleared', () => handleSelectObject(null));
+    let mouseMoveRaf: number | null = null;
+    canvas.on('mouse:move', (opt) => {
+      if (mouseMoveRaf) return;
+      mouseMoveRaf = requestAnimationFrame(() => {
+        mouseMoveRaf = null;
+        const active = canvas.getActiveObject();
+        if (!active) return;
+
+        const target = opt.target;
+        const isOverActive = Boolean(target && (target === active || (active.type === 'activeSelection' && (active as any).contains?.(target))));
+
+        if (isOverActive) {
+          showToolbar();
+        } else {
+          scheduleHideToolbar();
+        }
+      });
+    });
+
+
+
+
     
     // Smart Snapping and Arrows
     canvas.on('object:moving', (e) => {
@@ -319,19 +487,15 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
       } else {
         setSelectedLinkObj(null);
       }
-
-      // Image tracking
-      if (activeObject && activeObject.type === 'image') {
-        setSelectedImageObj(activeObject as fabric.Image);
-      } else {
-        setSelectedImageObj(null);
-      }
     };
     canvas.on('selection:created', updateSelectedObjects);
     canvas.on('selection:updated', updateSelectedObjects);
     canvas.on('selection:cleared', updateSelectedObjects);
 
+
+
     // ── Zoom (scroll wheel) ──
+
     canvas.on('mouse:wheel', (opt) => {
       const e = opt.e;
       const delta = e.deltaY;
@@ -528,7 +692,9 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
       }
       fabricRef.current = null;
     };
-  }, [page.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page.id, handleSelectObject, pushToHistory, restorePdfObjectsOnCanvas, syncGrid]);
+
+
 
   // ─── Tool Switching & Color ───
   useEffect(() => {
@@ -625,7 +791,37 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
         });
         shapeRef.current = circle;
         canvas.add(circle);
+      } else if (tool === 'diamond') {
+        const points = [
+          { x: pointer.x + 60, y: pointer.y },
+          { x: pointer.x + 120, y: pointer.y + 60 },
+          { x: pointer.x + 60, y: pointer.y + 120 },
+          { x: pointer.x, y: pointer.y + 60 }
+        ];
+        const diamond = new fabric.Polygon(points, {
+          left: pointer.x, top: pointer.y,
+          fill: fillTransparent, stroke: color, strokeWidth: 2,
+          selectable: true, evented: true,
+        });
+        canvas.add(diamond);
+        canvas.setActiveObject(diamond);
+        setActiveTool('select');
+        isDrawing.current = false;
+        pushToHistory();
+      } else if (tool === 'cylinder') {
+        const cylinder = new fabric.Rect({
+          left: pointer.x, top: pointer.y, width: 140, height: 90,
+          rx: 16, ry: 16,
+          fill: fillTransparent, stroke: color, strokeWidth: 2,
+          selectable: true, evented: true,
+        });
+        canvas.add(cylinder);
+        canvas.setActiveObject(cylinder);
+        setActiveTool('select');
+        isDrawing.current = false;
+        pushToHistory();
       } else if (tool === 'line') {
+
         const line = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
           stroke: color, strokeWidth: 2, selectable: false, evented: false,
         });
@@ -872,7 +1068,207 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
     }
   };
 
+  const handlePdfSelect = async (file: File) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdf = await loadingTask.promise;
+      setPdfPageCount(pdf.numPages);
+      setSelectedPdfFile(file);
+      setPdfModalOpen(true);
+    } catch (err) {
+      console.error('Failed to read PDF:', err);
+      toast.error('Failed to read PDF file');
+    }
+  };
+
+
+  const handleConfirmPdfImport = async (options: PdfImportOptions) => {
+    if (!selectedPdfFile || !fabricRef.current) return;
+    const { pages, layoutMode } = options;
+    if (pages.length === 0) return;
+
+    try {
+      const res = await storePdfToDB(selectedPdfFile, pdfPageCount);
+      const pdfUrl = await resolvePdfUrl(res.protocolUrl);
+
+      const loadingTask = pdfjsLib.getDocument({ url: pdfUrl });
+      const pdf = await loadingTask.promise;
+      const canvas = fabricRef.current!;
+      const vpt = canvas.viewportTransform!;
+      const center = canvas.getCenter();
+
+      const startX = (center.left - vpt[4]) / vpt[0];
+      const startY = (center.top - vpt[5]) / vpt[0];
+
+      if (layoutMode === 'separate-cards') {
+        // Import each selected page as a separate Fabric Image card side-by-side!
+        let currentX = startX;
+        for (let i = 0; i < pages.length; i++) {
+          const pageNum = pages[i];
+          const page = await pdf.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 1.2 });
+
+          const tempCanvas = document.createElement('canvas');
+          tempCanvas.width = viewport.width;
+          tempCanvas.height = viewport.height;
+          const ctx = tempCanvas.getContext('2d')!;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+          await page.render({ canvasContext: ctx, viewport, canvas: tempCanvas }).promise;
+
+          const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
+          tempCanvas.width = 0;
+          tempCanvas.height = 0;
+
+          await new Promise<void>((resolve) => {
+            fabric.Image.fromURL(dataUrl, (img) => {
+              if (img.width! > 550) img.scaleToWidth(550);
+              (img as any).set({
+                left: currentX,
+                top: startY,
+                originX: 'center', originY: 'center',
+                pdfProtocolUrl: res.protocolUrl,
+                pdfPageNum: pageNum,
+                pdfPageCount: pdfPageCount,
+                pdfIsSingleViewer: false
+              });
+              canvas.add(img);
+              currentX += (img.width! * (img.scaleX || 1)) + 40;
+              resolve();
+            });
+          });
+        }
+        canvas.renderAll();
+        setActiveTool('select');
+        pushToHistory();
+        toast.success(`Imported ${pages.length} PDF page card(s) to Whiteboard`);
+      } else {
+        // Single Document Viewer mode
+        const firstPage = pages[0];
+        const lastPage = pages[pages.length - 1];
+        const page = await pdf.getPage(firstPage);
+        const viewport = page.getViewport({ scale: 1.2 });
+
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = viewport.width;
+        tempCanvas.height = viewport.height;
+        const ctx = tempCanvas.getContext('2d')!;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        await page.render({ canvasContext: ctx, viewport, canvas: tempCanvas }).promise;
+
+        const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
+        tempCanvas.width = 0;
+        tempCanvas.height = 0;
+
+        fabric.Image.fromURL(dataUrl, (img) => {
+          if (img.width! > 700) img.scaleToWidth(700);
+          (img as any).set({
+            left: startX,
+            top: startY,
+            originX: 'center', originY: 'center',
+            pdfProtocolUrl: res.protocolUrl,
+            pdfPages: pages,
+            pdfStartPage: firstPage,
+            pdfEndPage: lastPage,
+            pdfCurrentPage: firstPage,
+            pdfPageCount: pdfPageCount,
+            pdfIsSingleViewer: true
+          });
+
+
+          canvas.add(img);
+          canvas.setActiveObject(img);
+          canvas.renderAll();
+          setActiveTool('select');
+          pushToHistory();
+          toast.success(`Imported PDF document (${pages.length} pages)`);
+        });
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to embed PDF');
+    }
+  };
+
+  const changePdfPageOnWhiteboard = async (obj: any, target: 'prev' | 'next' | number) => {
+    if (!obj || !obj.pdfProtocolUrl) return;
+
+    try {
+      const pdfUrl = await resolvePdfUrl(obj.pdfProtocolUrl);
+      if (!pdfUrl) {
+        toast.error('PDF file data not found in storage');
+        return;
+      }
+
+      const loadingTask = pdfjsLib.getDocument({ url: pdfUrl });
+      const pdf = await loadingTask.promise;
+      const totalPages = obj.pdfPageCount || pdf.numPages;
+
+      const allowedPages: number[] = obj.pdfPages && Array.isArray(obj.pdfPages) && obj.pdfPages.length > 0
+        ? obj.pdfPages
+        : Array.from({ length: obj.pdfEndPage ? (obj.pdfEndPage - (obj.pdfStartPage || 1) + 1) : totalPages }, (_, i) => (obj.pdfStartPage || 1) + i);
+
+      const current = obj.pdfCurrentPage || allowedPages[0] || 1;
+      const currentIndex = allowedPages.indexOf(current) !== -1 ? allowedPages.indexOf(current) : 0;
+
+      let newIndex = currentIndex;
+      if (target === 'next') newIndex = Math.min(allowedPages.length - 1, currentIndex + 1);
+      else if (target === 'prev') newIndex = Math.max(0, currentIndex - 1);
+      else if (typeof target === 'number') {
+        const foundIdx = allowedPages.indexOf(target);
+        if (foundIdx !== -1) {
+          newIndex = foundIdx;
+        } else if (target >= 1 && target <= allowedPages.length) {
+          newIndex = target - 1;
+        } else {
+          newIndex = allowedPages.reduce((closestIdx, p, idx) => {
+            return Math.abs(p - target) < Math.abs(allowedPages[closestIdx] - target) ? idx : closestIdx;
+          }, 0);
+        }
+      }
+
+
+      const newPage = allowedPages[newIndex];
+      if (newPage === current && typeof target === 'string') return;
+
+      const page = await pdf.getPage(newPage);
+      const viewport = page.getViewport({ scale: 1.2 });
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = viewport.width;
+      tempCanvas.height = viewport.height;
+      const ctx = tempCanvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      await page.render({ canvasContext: ctx, viewport, canvas: tempCanvas }).promise;
+
+      const imgUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
+      const imgEl = new Image();
+      imgEl.onload = () => {
+        obj.setElement(imgEl);
+        obj.pdfCurrentPage = newPage;
+        obj.pdfPageCount = totalPages;
+        fabricRef.current?.renderAll();
+        pushToHistory();
+        setUpdateCounter(prev => prev + 1);
+      };
+      imgEl.src = imgUrl;
+
+      // Free canvas memory
+      tempCanvas.width = 0;
+      tempCanvas.height = 0;
+
+    } catch (err) {
+      console.error('Failed to change PDF page:', err);
+      toast.error('Failed to change PDF page');
+    }
+  };
+
   const handleExportPDF = () => {
+
+
+
     if (!fabricRef.current) return;
     
     // Temporarily reset viewport to capture everything
@@ -1130,51 +1526,64 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
         canUndo={undoStack.length > 1}
         canRedo={redoStack.length > 0}
         onImageSelect={handleImageSelect}
+        onPdfSelect={handlePdfSelect}
         onExportPDF={handleExportPDF}
         onExportImage={handleExportImage}
       />
       
       <Minimap canvas={fabricRef.current} />
+
+      <PdfImportModal
+        isOpen={pdfModalOpen}
+        onClose={() => setPdfModalOpen(false)}
+        file={selectedPdfFile}
+        pageCount={pdfPageCount}
+        onConfirmImport={handleConfirmPdfImport}
+      />
+
       
-      {selectedImageObj && !selectedLinkObj && (
-        <div className="absolute top-4 right-4 z-50">
-          <button 
-            onClick={() => setCroppingImageObj(selectedImageObj)}
-            className="flex items-center gap-2 bg-surface-hover text-text-primary border border-border px-4 py-2 rounded-lg shadow-lg hover:bg-surface-hover transition-colors font-medium text-sm"
-          >
-            <Crop className="w-4 h-4" />
-            Crop Image
-          </button>
-        </div>
-      )}
-
-
       {activeObject && fabricRef.current && !(activeObject as any).isEditing && (
         <div 
-          className="absolute z-50 flex items-center gap-1 bg-surface border border-border shadow-lg rounded-lg p-1"
+          onMouseEnter={showToolbar}
+          onMouseMove={showToolbar}
+          onMouseLeave={scheduleHideToolbar}
+          className={`absolute z-50 flex items-center gap-1 bg-surface border border-border shadow-xl rounded-lg p-1 transition-all duration-200 ${
+            isToolbarVisible ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'
+          }`}
+
+
           style={{ 
             top: `${Math.max(10, activeObject.getBoundingRect().top - 50)}px`, 
             left: `${Math.max(10, activeObject.getBoundingRect().left)}px` 
           }}
         >
+          {/* Bring Forward */}
           <button
-            className="p-2 hover:bg-surface-hover rounded transition-colors text-text-primary"
+            type="button"
+            className="p-1.5 hover:bg-surface-hover rounded transition-colors text-text-primary"
             title="Bring Forward"
             onClick={() => { fabricRef.current?.bringForward(activeObject); fabricRef.current?.renderAll(); pushToHistory(); }}
           >
             <ArrowUp className="w-4 h-4" />
           </button>
+
+          {/* Send Backward */}
           <button
-            className="p-2 hover:bg-surface-hover rounded transition-colors text-text-primary"
+            type="button"
+            className="p-1.5 hover:bg-surface-hover rounded transition-colors text-text-primary"
             title="Send Backward"
             onClick={() => { fabricRef.current?.sendBackwards(activeObject); fabricRef.current?.renderAll(); pushToHistory(); }}
           >
             <ArrowDown className="w-4 h-4" />
           </button>
-          <div className="w-px h-5 bg-border mx-1" />
+
+          <div className="w-px h-5 bg-border mx-0.5" />
+
+          {/* Lock / Unlock */}
           <button
-            className="p-2 hover:bg-surface-hover rounded transition-colors text-text-primary"
-            title={activeObject.lockMovementX ? "Unlock" : "Lock"}
+            type="button"
+            className="p-1.5 hover:bg-surface-hover rounded transition-colors text-text-primary"
+            title={activeObject.lockMovementX ? "Unlock Object" : "Lock Object"}
             onClick={() => { 
               const isLocked = activeObject.lockMovementX;
               activeObject.set({
@@ -1186,14 +1595,160 @@ export const WhiteboardEditor: React.FC<WhiteboardEditorProps> = ({ page, title,
               });
               fabricRef.current?.renderAll();
               pushToHistory();
-              // Force re-render UI
-              setActiveObject(Object.assign({}, activeObject) as any);
+              setUpdateCounter(prev => prev + 1);
             }}
           >
             {activeObject.lockMovementX ? <Lock className="w-4 h-4 text-accent" /> : <Unlock className="w-4 h-4" />}
           </button>
+
+          {/* Duplicate Object */}
+          <button
+            type="button"
+            className="p-1.5 hover:bg-surface-hover rounded transition-colors text-text-primary"
+            title="Duplicate Object"
+            onClick={handleDuplicateObject}
+          >
+            <Copy className="w-4 h-4" />
+          </button>
+
+          {/* Delete Object */}
+          <button
+            type="button"
+            className="p-1.5 hover:bg-red-500/10 text-red-500 rounded transition-colors"
+            title="Delete Object"
+            onClick={handleDeleteObject}
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+
+          {/* Contextual Actions per Object Type */}
+          {(() => {
+            // PDF Tools
+            const isPdf = Boolean((activeObject as any).pdfProtocolUrl);
+            if (isPdf) {
+              const isSplitCard = (activeObject as any).pdfIsSingleViewer === false || Boolean((activeObject as any).pdfPageNum);
+              if (isSplitCard) {
+                return (
+                  <>
+                    <div className="w-px h-5 bg-border mx-0.5" />
+                    <span className="text-xs font-semibold px-2 py-0.5 bg-primary/10 text-primary rounded select-none whitespace-nowrap">
+                      Page {(activeObject as any).pdfPageNum || (activeObject as any).pdfCurrentPage || 1}
+                    </span>
+                  </>
+                );
+              }
+
+              const allowedPages: number[] | null = (activeObject as any).pdfPages && Array.isArray((activeObject as any).pdfPages) && (activeObject as any).pdfPages.length > 0
+                ? (activeObject as any).pdfPages
+                : null;
+
+              const currentP = (activeObject as any).pdfCurrentPage || (activeObject as any).pdfStartPage || 1;
+              const startP = (activeObject as any).pdfStartPage || 1;
+              const endP = (activeObject as any).pdfEndPage || (activeObject as any).pdfPageCount || 1;
+
+              const isFirst = allowedPages ? allowedPages.indexOf(currentP) <= 0 : currentP <= startP;
+              const isLast = allowedPages ? allowedPages.indexOf(currentP) >= allowedPages.length - 1 : currentP >= endP;
+
+              const displayLabel = allowedPages
+                ? `Page ${currentP} (${allowedPages.indexOf(currentP) + 1} of ${allowedPages.length})`
+                : `Page ${currentP} of ${endP}`;
+
+              return (
+                <>
+                  <div className="w-px h-5 bg-border mx-0.5" />
+                  <button
+                    type="button"
+                    className="p-1.5 hover:bg-surface-hover rounded transition-colors text-text-primary disabled:opacity-30"
+                    title="Previous PDF Page"
+                    disabled={isFirst}
+                    onClick={() => changePdfPageOnWhiteboard(activeObject, 'prev')}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = window.prompt(`Jump directly to page number:`, String(currentP));
+                      if (input) {
+                        const pageNum = parseInt(input, 10);
+                        if (!isNaN(pageNum)) {
+                          changePdfPageOnWhiteboard(activeObject, pageNum);
+                        }
+                      }
+                    }}
+                    className="text-xs font-semibold px-2 py-0.5 hover:bg-surface-hover rounded transition-colors text-text-primary hover:text-primary select-none whitespace-nowrap cursor-pointer flex items-center gap-1 border border-transparent hover:border-border/60"
+                    title="Click to jump directly to any page number"
+                  >
+                    <span>{displayLabel}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="p-1.5 hover:bg-surface-hover rounded transition-colors text-text-primary disabled:opacity-30"
+                    title="Next PDF Page"
+                    disabled={isLast}
+                    onClick={() => changePdfPageOnWhiteboard(activeObject, 'next')}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </>
+              );
+            }
+
+            // Image Crop Tool
+            const isImage = (activeObject as any).type === 'image' && !(activeObject as any).pdfProtocolUrl;
+            if (isImage) {
+              return (
+                <>
+                  <div className="w-px h-5 bg-border mx-0.5" />
+                  <button
+                    type="button"
+                    onClick={() => setCroppingImageObj(activeObject as fabric.Image)}
+                    className="flex items-center gap-1 px-2 py-1 hover:bg-surface-hover text-text-primary text-xs rounded transition-colors font-medium"
+                    title="Crop Image"
+                  >
+                    <Crop className="w-3.5 h-3.5" />
+                    <span>Crop</span>
+                  </button>
+                </>
+              );
+            }
+
+            // Bookmark / Page Link Tool
+            const isLink = Boolean((activeObject as any).bookmarkUrl || (activeObject as any).internalPageId);
+            if (isLink) {
+              return (
+                <>
+                  <div className="w-px h-5 bg-border mx-0.5" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if ((activeObject as any).bookmarkUrl) {
+                        window.open((activeObject as any).bookmarkUrl, '_blank');
+                      } else if ((activeObject as any).internalPageId) {
+                        navigate((activeObject as any).internalPageType === 'page' 
+                          ? `/app/page/${(activeObject as any).internalPageId}` 
+                          : `/app/whiteboard/${(activeObject as any).internalPageId}`);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 bg-accent text-accent-foreground text-xs rounded hover:bg-accent/90 transition-colors font-medium"
+                    title="Open Link"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open</span>
+                  </button>
+                </>
+              );
+            }
+
+            return null;
+          })()}
         </div>
       )}
+
+
+
+
+
 
       {/* Header overlay */}
       {selectedLinkObj && (

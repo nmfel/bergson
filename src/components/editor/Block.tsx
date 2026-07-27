@@ -12,6 +12,15 @@ import { useNavigate } from 'react-router-dom';
 import { TableBlock } from './TableBlock';
 import { KanbanBlock } from './KanbanBlock';
 import { ColumnsBlock } from './ColumnsBlock';
+import { PdfCanvasViewer } from '../common/PdfCanvasViewer';
+import { PdfImportModal } from '../common/PdfImportModal';
+import { storePdfToDB, resolvePdfUrl } from '../../utils/pdfStorage';
+import { pdfjsLib } from '../../utils/pdfWorkerInit';
+import { MermaidBlock } from './MermaidBlock';
+import { toast } from 'sonner';
+
+
+
 interface BlockProps {
   block: BlockType;
   index: number;
@@ -31,7 +40,122 @@ interface BlockProps {
   dragOverPosition: 'top' | 'bottom' | null;
 }
 
+const PdfBlockComponent: React.FC<{
+
+  block: BlockType;
+  onUpdate: (id: string, content: string, type?: BlockType['type']) => void;
+  onFocus: (id: string) => void;
+  contentEditableRef: React.RefObject<HTMLDivElement | null>;
+  handleKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+}> = ({ block, onUpdate, onFocus, contentEditableRef, handleKeyDown }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pageCount, setPageCount] = useState(1);
+  const [resolvedPdfUrl, setResolvedPdfUrl] = useState<string>('');
+  const [metadata, setMetadata] = useState<any>(null);
+
+  useEffect(() => {
+    if (block.content) {
+      try {
+        const parsed = JSON.parse(block.content);
+        setMetadata(parsed);
+        if (parsed.pdfProtocolUrl) {
+          resolvePdfUrl(parsed.pdfProtocolUrl).then(url => setResolvedPdfUrl(url));
+        }
+      } catch (e) {
+        if (block.content.startsWith('bergson-pdf://')) {
+          setMetadata({ pdfProtocolUrl: block.content, startPage: 1 });
+          resolvePdfUrl(block.content).then(url => setResolvedPdfUrl(url));
+        }
+      }
+    }
+  }, [block.content]);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      const pdf = await loadingTask.promise;
+
+      setPageCount(pdf.numPages);
+      setSelectedFile(file);
+      setModalOpen(true);
+    } catch (err) {
+      console.error('Error reading PDF:', err);
+      toast.error('Failed to read PDF file');
+    }
+  };
+
+  const handleConfirmImport = async (options: { pages: number[] }) => {
+    if (!selectedFile) return;
+    const { pages } = options;
+    if (pages.length === 0) return;
+    try {
+      const res = await storePdfToDB(selectedFile, pageCount);
+      const payload = JSON.stringify({
+        pdfProtocolUrl: res.protocolUrl,
+        name: selectedFile.name,
+        size: selectedFile.size,
+        pages,
+        startPage: pages[0],
+        endPage: pages[pages.length - 1],
+        pageCount
+      });
+      onUpdate(block.id!, payload);
+      toast.success(`PDF document embedded successfully (${pages.length} pages)`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to embed PDF');
+    }
+  };
+
+
+  if (!metadata || !resolvedPdfUrl) {
+    return (
+      <div className="w-full relative my-1">
+        <div 
+          className="w-full flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-6 hover:bg-surface-hover cursor-pointer transition-colors"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <FileText className="w-8 h-8 text-primary mb-2" />
+          <span className="text-text-secondary text-sm font-medium">Click to upload PDF document</span>
+          <span className="text-text-muted text-xs mt-1">Recommended max 25 MB</span>
+          <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf" onChange={handleFileSelect} />
+          <div ref={contentEditableRef} contentEditable suppressContentEditableWarning className="hidden" onFocus={() => onFocus(block.id!)} onKeyDown={handleKeyDown}></div>
+        </div>
+
+        <PdfImportModal
+          isOpen={modalOpen}
+          onClose={() => setModalOpen(false)}
+          file={selectedFile}
+          pageCount={pageCount}
+          showLayoutOptions={false}
+          onConfirmImport={handleConfirmImport}
+        />
+
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full my-2 relative group">
+      <PdfCanvasViewer
+        pdfUrl={resolvedPdfUrl}
+        pages={metadata.pages}
+        startPage={metadata.startPage || 1}
+        endPage={metadata.endPage}
+      />
+
+      <div ref={contentEditableRef} contentEditable suppressContentEditableWarning className="hidden" onFocus={() => onFocus(block.id!)} onKeyDown={handleKeyDown}></div>
+    </div>
+  );
+};
+
 const BookmarkBlock: React.FC<{
+
   block: BlockType;
   onUpdate: (id: string, content: string, type?: BlockType['type']) => void;
   onFocus: (id: string) => void;
@@ -173,6 +297,8 @@ const PageLinkBlock: React.FC<{
   contentEditableRef: React.RefObject<HTMLDivElement | null>;
   handleKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
 }> = ({ block, onUpdate, onFocus, contentEditableRef, handleKeyDown }) => {
+  const navigate = useNavigate();
+
   let metadata: any = null;
   if (block.content) {
     try {
@@ -198,8 +324,6 @@ const PageLinkBlock: React.FC<{
       </div>
     );
   }
-
-  const navigate = useNavigate();
 
   const navigateToPage = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -574,7 +698,29 @@ const BlockComponent: React.FC<BlockProps> = ({
             )}
           </div>
         );
+      case 'pdf':
+        return (
+          <PdfBlockComponent
+            block={block}
+            onUpdate={onUpdate}
+            onFocus={onFocus}
+            contentEditableRef={contentEditableRef}
+            handleKeyDown={handleKeyDown}
+          />
+        );
+      case 'diagram':
+        return (
+          <MermaidBlock
+            block={block}
+            onUpdate={onUpdate}
+            onFocus={onFocus}
+            contentEditableRef={contentEditableRef}
+            handleKeyDown={handleKeyDown}
+          />
+        );
+
       case 'link':
+
         return (
           <BookmarkBlock 
             block={block} 

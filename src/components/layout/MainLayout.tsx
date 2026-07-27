@@ -42,14 +42,13 @@ export const MainLayout: React.FC = () => {
   }, [fontFamily]);
 
   useEffect(() => {
-    // Run trash cleanup, silent cloud auth check, and auto-backup on app startup
+    // Run trash cleanup and silent auto-backup on app startup (non-interactive, no popups)
     pageRepository.cleanupTrash().catch(console.error);
-    if (useSyncStore.getState().isConnected || useSyncStore.getState().accessToken) {
-      googleDriveSync.ensureValidToken()
-        .then(() => googleDriveSync.checkAutoBackup())
-        .catch(console.warn);
+    if (useSyncStore.getState().isConnected) {
+      googleDriveSync.checkAutoBackup().catch(console.warn);
     }
   }, []);
+
 
   return (
     <div className="flex h-screen w-full bg-background text-text-primary overflow-hidden">

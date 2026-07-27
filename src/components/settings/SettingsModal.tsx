@@ -5,6 +5,7 @@ import { useSyncStore } from '../../store/syncStore';
 import { googleDriveSync } from '../../services/googleDriveSync';
 import { exportDatabase, importDatabase, wipeDatabase } from '../../utils/exportImport';
 import { cleanupOrphanedImages } from '../../utils/storageCleanup';
+import { db } from '../../db/database';
 import { cn } from '../../utils';
 import { Button } from '../ui/button';
 import { toast } from 'sonner';
@@ -27,7 +28,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const [isImporting, setIsImporting] = useState(false);
   const [isSyncingUI, setIsSyncingUI] = useState(false);
   const [storageUsage, setStorageUsage] = useState({ usage: 0, quota: 1 });
+  const [tableStats, setTableStats] = useState({ pages: 0, blocks: 0, images: 0, pdfs: 0 });
   const [isCleaning, setIsCleaning] = useState(false);
+
 
   const { accessToken, isConnected, lastSyncedAt, disconnect } = useSyncStore();
 
@@ -44,10 +47,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               quota: quota || 1 
             });
           }
+
+          const [pages, blocks, images, pdfs] = await Promise.all([
+            db.pages.count(),
+            db.blocks.count(),
+            db.images.count(),
+            db.pdfs.count(),
+          ]);
+          setTableStats({ pages, blocks, images, pdfs });
         } catch (error) {
           console.error('Failed to calculate storage:', error);
         }
       };
+
       
       calculatePreciseUsage();
       intervalId = setInterval(calculatePreciseUsage, 1000);
@@ -469,20 +481,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   
                   {/* Storage Usage */}
                   <div className="flex flex-col p-5 rounded-xl border border-border bg-card">
-                    <h4 className="font-medium text-text-primary mb-1">Storage Usage</h4>
+                    <h4 className="font-medium text-text-primary mb-1">Storage Usage & Breakdown</h4>
                     <p className="text-sm text-text-muted mb-4">
-                      Bergson stores everything locally in your browser. 
+                      Bergson stores everything locally in your browser with zero external server dependencies. 
                     </p>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 mb-4">
                       <Database className="w-5 h-5 text-accent" />
                       <div>
                         <span className="text-xl font-bold text-text-primary">
                           {(storageUsage.usage / 1024 / 1024).toFixed(2)} MB
                         </span>
-                        <span className="text-sm text-text-muted ml-2">used</span>
+                        <span className="text-sm text-text-muted ml-2">used in local browser database</span>
+                      </div>
+                    </div>
+
+                    {/* Table breakdown stats */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-border/60 text-xs">
+                      <div className="bg-surface/60 p-2 rounded-lg border border-border/40">
+                        <p className="text-text-muted text-[11px]">Pages & Boards</p>
+                        <p className="font-semibold text-text-primary text-sm mt-0.5">{tableStats.pages}</p>
+                      </div>
+                      <div className="bg-surface/60 p-2 rounded-lg border border-border/40">
+                        <p className="text-text-muted text-[11px]">Text Blocks</p>
+                        <p className="font-semibold text-text-primary text-sm mt-0.5">{tableStats.blocks}</p>
+                      </div>
+                      <div className="bg-surface/60 p-2 rounded-lg border border-border/40">
+                        <p className="text-text-muted text-[11px]">Stored Images</p>
+                        <p className="font-semibold text-text-primary text-sm mt-0.5">{tableStats.images}</p>
+                      </div>
+                      <div className="bg-surface/60 p-2 rounded-lg border border-border/40">
+                        <p className="text-text-muted text-[11px]">Stored PDFs</p>
+                        <p className="font-semibold text-text-primary text-sm mt-0.5">{tableStats.pdfs}</p>
                       </div>
                     </div>
                   </div>
+
 
                   {/* Clean Up Storage */}
                   <div className="flex items-start justify-between p-5 rounded-xl border border-border bg-card">

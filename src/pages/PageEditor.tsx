@@ -93,7 +93,7 @@ export const PageEditor: React.FC = () => {
   useEffect(() => {
     const fetchBacklinks = async () => {
       if (!page) return;
-      const allBlocks = await blockRepository.getBlocksByPageId(page.id!);
+      const allBlocks = await blockRepository.getAllBlocks();
       const allPages = await pageRepository.getAllPages();
       
       const links: { block: Block; pageTitle: string }[] = [];
