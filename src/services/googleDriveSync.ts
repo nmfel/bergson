@@ -5,7 +5,7 @@ import { cleanupOrphanedImages } from '../utils/storageCleanup';
 
 declare const google: any;
 
-const CLIENT_ID = '197043603410-joh2i9cf1p47hfsip91numdas0mia8so.apps.googleusercontent.com'; // User will replace this
+const CLIENT_ID = 'xxx'; // User will replace this
 const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
 const BACKUP_FILENAME = 'bergson_backup.json';
 
